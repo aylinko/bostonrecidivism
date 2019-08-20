@@ -1,0 +1,186 @@
+---
+title: "Recidivism in Boston"
+output: html_notebook
+---
+
+## FIO Records 2015 
+
+### Input data
+
+Both FIO Records 2015 1 & 2 were merged together.
+ 
+```{r}
+
+setwd("~/R Data Files") 
+
+FIO15 <- read.csv('FIO Records 2015 (New RMS) - FieldContact_Name Table.csv')
+
+FIO15_2 <- read.csv('FIO Records 2015 (New RMS) - FieldContact Table.csv')
+
+FIO15_Records = merge(FIO15, FIO15_2, by = 'fc_num',all = TRUE)
+
+head(FIO15_Records)
+
+```
+ 
+### Look for NA's & Missing Data
+
+```{r}
+
+summary(FIO15_Records)
+
+```
+
+```{r}
+
+str(FIO15_Records)
+
+```
+
+### Clean Data
+
+##### Get Rid of NA's
+
+###### Factor Out Data Variables 
+
+Can't delete NA's for this data set so the values with many NA's were factored with a U to signify it's a missing value.
+
+```{r message=FALSE, warning=FALSE}
+
+FIO15_Records$race <- factor(FIO15_Records$race)
+
+levels(FIO15_Records$race) <- c("Asian","Black","Native American / Alaskan Native","Native Hawaiian / Other Pacific Islander", "Unknown", "White", "Not Specified", "Other")
+
+
+FIO15_Records$build <- factor(FIO15_Records$build, levels = c("Medium", "Thin", "Small", "Heavy", "Stocky", "Other", "Not Specified"), ordered = TRUE)
+
+levels(FIO15_Records$build) <- c(levels(FIO15_Records$build),"U")
+FIO15_Records$build[is.na(FIO15_Records$build)]<- "U"
+
+
+```
+
+##### Check Factors 
+
+```{r}
+
+levels(FIO15_Records$race)
+
+levels(FIO15_Records$build)
+
+```
+
+
+##### Delete NA's
+
+Can't delete NA's in merged data sets therefore NA's had to be factored into a U
+
+```{r}
+
+newFIO15_Records = FIO15_Records
+
+newFIO15_Records = newFIO15_Records[!is.na(newFIO15_Records$age),]
+
+newFIO15_Records = newFIO15_Records[!(newFIO15_Records$zip == ""),]
+
+newFIO15_Records$sex = droplevels(newFIO15_Records$sex)
+
+```
+
+
+##### Check Data For Changes
+
+```{r}
+
+summary(newFIO15_Records)
+
+```
+
+### Map
+
+```{r}
+#library(ggmap)
+#library(dplyr)
+#X = mutate_geocode(FI11_15[1:1000,], ADDRESS)
+
+FI11_15 = read.csv("FI11_15.csv")
+FI11_15 = FI11_15[,-1]
+street_address = read.csv("Live_Street_Address_Management_SAM_Addresses.csv") 
+colnames(street_address)[1] = "X"
+# geocoding street address.
+FI11_15 = FI11_15[complete.cases(FI11_15),]
+dim(FI11_15[complete.cases(FI11_15),])
+#street_address = Live_Street_Address_Management_SAM_Addresses
+street_address = street_address[,colnames(street_address) %in% c('X','Y','STREET_ID')]
+street_address = unique(street_address)
+street_address = street_address[street_address$STREET_ID %in% FI11_15$STREET_ID,]
+street_address = street_address[!duplicated(street_address$STREET_ID),]
+data = merge(FI11_15,street_address,by="STREET_ID")
+
+colnames(data)[45] = "long"
+colnames(data)[46] = "lat"
+summary(data)
+table(FI11_15$DIST)
+# install the packages
+if(!require(readr)) install.packages("readr")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(DT)) install.packages("DT")
+if(!require(ggrepel)) install.packages("ggrepel")
+if(!require(leaflet)) install.packages("leaflet")
+
+library(rgdal)
+library(raster)
+library(htmlwidgets)
+
+policeDistricts <- shapefile("C:\\Users\\Aylin\\Documents\\R Data Files\\Police_Districts\\Police_Districts.shp")
+policeDistricts$NAME <-c('Charlestown','East Boston','Downtown','South Boston',
+                         'South End','Brighton','Jamaica Plain','West Roxbury',
+                         'Mattapan','Dorchester','Hyde Park','Roxbury')
+policeDistricts$INCIDENTS = c(26, 23,71,77,189,65,137,26,1048,1743,84,3789)
+# Display crime incident locations on the map using leaflet. 
+# Click icons on the map to show incident details.
+
+library(leaflet)
+#data = FI11_15
+data$popup <- paste("<b>Incident #: </b>", data$FIO_ID, "<br>",
+                    "<b>Category: </b>", data$CAT,
+                    "<br>", "<b>Reason: </b>", data$STOP_REASONS,
+                    "<br>", "<b>Date: </b>", data$FIO_DATE,
+                    "<br>", "<b>Time: </b>", data$FIO_TIME,
+                    "<br>", "<b>PD district: </b>", data$OFF_DIST,
+                    "<br>", "<b>Resolution: </b>", data$OUTCOME,
+                    "<br>", "<b>Address: </b>", data$LOCATION,
+                    "<br>", "<b>Longitude: </b>", data$long,
+                    "<br>", "<b>Latitude: </b>", data$lat
+)
+
+bins <- c(0,50, 100, 500, 1000, 1500, 2000, 2500, 3000, 5000)
+pal <- colorBin("Greens", domain = policeDistricts$INCIDENTS, bins = bins)
+
+leaflet(data, width = "100%") %>% addTiles() %>%
+     addTiles(group = "OSM (default)") %>%
+     addProviderTiles(provider = "Esri.WorldStreetMap",group = "World StreetMap") %>%
+    addProviderTiles(provider = "Esri.WorldImagery",group = "World Imagery") %>%
+  
+  # addProviderTiles(provider = "NASAGIBS.ViirsEarthAtNight2012",group = "Nighttime Imagery") %>%
+ addMarkers(data = data,lng = ~long, lat = ~lat, popup = data$popup, clusterOptions = markerClusterOptions()) %>%
+ addPolygons(data = policeDistricts, fill=TRUE,fillColor = ~pal(INCIDENTS),fillOpacity = 0.7 ,stroke = TRUE, color = "red", 
+              popup = paste0("DISTRICT:",policeDistricts$NAME, "<br>", 
+                             "DIST_ID:", policeDistricts$DISTRICT, "<br>",
+                             "TOTAL INCIDENTS:",policeDistricts$INCIDENTS ))%>% 
+  
+addLayersControl(
+    baseGroups = c("OSM (default)","World StreetMap", "World Imagery"),
+    options = layersControlOptions(collapsed = FALSE)
+    
+  )
+
+
+#a$width <- 874
+#a$height <- 700
+
+#saveWidget(a,"FI11-15Map.html", selfcontained = FALSE)   
+ 
+
+```
+
